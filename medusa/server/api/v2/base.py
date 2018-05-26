@@ -17,13 +17,14 @@ from babelfish.language import Language
 import jwt
 
 from medusa import app
+from medusa.logger.adapters.style import BraceAdapter
 
 from six import string_types, text_type, viewitems
 
 from tornado.httpclient import HTTPError
 from tornado.web import RequestHandler
 
-log = logging.getLogger(__name__)
+log = BraceAdapter(logging.getLogger(__name__))
 
 
 class BaseRequestHandler(RequestHandler):
@@ -111,7 +112,17 @@ class BaseRequestHandler(RequestHandler):
             self.set_status(status or 200)
             if data is not None:
                 self.set_header('content-type', content_type)
-                self.finish(json.JSONEncoder(default=json_default_encoder).encode(data))
+                try:
+                    encoded_json = json.JSONEncoder(default=json_default_encoder).encode(data)
+                    self.finish(encoded_json)
+                except UnicodeDecodeError as error:
+                    log.error(
+                        'UnicodeDecodeError caught while encoding data to JSON format. Error: {error}.\n'
+                        'Failed: {text!r}\n'
+                        'Raw data: {data!r}',
+                        {'error': error, 'text': error.args[1], 'data': data}
+                    )
+                    return self._internal_server_error(repr(error))
             elif stream:
                 # This is mainly for assets
                 self.set_header('content-type', content_type)
@@ -405,10 +416,9 @@ class PatchField(object):
                 setattr(target, self.attr, self.converter(value))
             except AttributeError:
                 log.warning(
-                    'Error trying to change attribute %s on target %s, you sure'
+                    'Error trying to change attribute {attr} on target {target}, you sure'
                     ' you are allowed to change this attribute?',
-                    self.attr,
-                    target
+                    {'attr': self.attr, 'target': target}
                 )
                 return False
 
